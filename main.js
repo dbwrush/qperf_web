@@ -7,6 +7,7 @@ document.getElementById("questions-input").addEventListener("change", (event) =>
   const files = event.target.files;
   const fileNames = Array.from(files).map((file) => file.name).join(", ");
   document.getElementById("selected-questions").textContent = `Selected: ${fileNames || "None"}`;
+  checkFilesReady();
 });
 
 document.getElementById("select-logs").addEventListener("click", () => {
@@ -18,30 +19,11 @@ document.getElementById("logs-input").addEventListener("change", (event) => {
   const files = event.target.files;
   const fileNames = Array.from(files).map((file) => file.name).join(", ");
   document.getElementById("selected-logs").textContent = `Selected: ${fileNames || "None"}`;
+  checkFilesReady();
 });
 
 document.getElementById("clear").addEventListener("click", () => {
-  // Clear file selections
-  document.getElementById("questions-input").value = "";
-  document.getElementById("logs-input").value = "";
-  document.getElementById("selected-questions").textContent = "Selected: None";
-  document.getElementById("selected-logs").textContent = "Selected: None";
-
-  // Reset question type checkboxes
-  const questionTypeCheckboxes = document.querySelectorAll("#question-types input[type='checkbox']");
-  questionTypeCheckboxes.forEach((checkbox) => {
-    checkbox.checked = true;
-  });
-
-  // Reset delimiter and tournament name
-  document.getElementById("delimiter").value = "";
-  document.getElementById("tournament").value = "";
-
-  // Reset 'display individual rounds' checkbox
-  document.getElementById("display-rounds").checked = false;
-
-  // Optionally update the status message
-  document.getElementById("status-message").textContent = "Waiting for input files";
+  clear();
 });
 
 document.getElementById("run").addEventListener("click", async () => {
@@ -68,6 +50,8 @@ document.getElementById("run").addEventListener("click", async () => {
   // Get the display individual rounds option
   const displayRounds = document.getElementById("display-rounds").checked;
 
+  // Update status message to processing
+  updateStatusMessage("processing");
   // Call the qperf function
   await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, displayRounds);
 });
@@ -137,7 +121,14 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   const warningsDiv = document.getElementById("warnings");
   warningsDiv.innerHTML = warns.length
     ? warns.map(w => `<div class="warning">${w}</div>`).join("")
-    : "<div>No warnings.</div>";
+    : "";
+
+  // Update status message after processing
+  if (result && result.trim().length > 0) {
+    updateStatusMessage("done");
+  } else {
+    updateStatusMessage("nooutput");
+  }
 
   // Enable save button and store result for download
   window.qperfOutput = result;
@@ -862,6 +853,61 @@ function buildTeamResults(warns, rounds, delim, verbose, displayRounds) {
   return result;
 }
 
+// Utility to update the status message with helpful hints
+function updateStatusMessage(stage = "init") {
+  const statusDiv = document.getElementById("status-message");
+  switch (stage) {
+    case "init":
+      statusDiv.textContent = "Waiting for input files. Please select both a question set (RTF) and quiz logs (CSV) to begin.";
+      break;
+    case "ready":
+      statusDiv.textContent = "Files loaded! Set question types and settings. When ready, click 'Run' to process your data.";
+      break;
+    case "processing":
+      statusDiv.textContent = "Processing files... Please wait.";
+      break;
+    case "done":
+      statusDiv.textContent = "Output generated! Click 'Save Output' to download your CSV file. You may adjust settings and run again if needed.";
+      break;
+    case "nooutput":
+      statusDiv.textContent = "No output generated. Please check your input files and settings.";
+      break;
+    default:
+      statusDiv.textContent = "";
+  }
+}
+
+// Update status on file selection
+function checkFilesReady() {
+  const questionsInput = document.getElementById("questions-input");
+  const logsInput = document.getElementById("logs-input");
+  const runButton = document.getElementById("run");
+
+  // Log the actual FileList objects for debugging
+  console.log("Questions input files:", questionsInput.files);
+  console.log("Logs input files:", logsInput.files);
+
+  // Check if at least one file is selected for each input
+  const questionsSelected = questionsInput.files && questionsInput.files.length > 0;
+  const logsSelected = logsInput.files && logsInput.files.length > 0;
+
+  console.log("Questions selected:", questionsSelected);
+  console.log("Logs selected:", logsSelected);
+
+  if (questionsSelected && logsSelected) {
+    updateStatusMessage("ready");
+    runButton.disabled = false;
+  } else {
+    updateStatusMessage("init");
+    runButton.disabled = true;
+  }
+}
+
+// On page load, set initial status message and disable run button
+clear();
+updateStatusMessage("init");
+document.getElementById("run").disabled = true;
+
 document.getElementById("save-output").addEventListener("click", () => {
   const output = window.qperfOutput || "";
   const blob = new Blob([output], { type: "text/csv" });
@@ -876,3 +922,25 @@ document.getElementById("save-output").addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+function clear() {
+  // Clear file selections
+  document.getElementById("questions-input").value = "";
+  document.getElementById("logs-input").value = "";
+  document.getElementById("selected-questions").textContent = "Selected: None";
+  document.getElementById("selected-logs").textContent = "Selected: None";
+  checkFilesReady();
+
+
+  // Reset question type checkboxes
+  const questionTypeCheckboxes = document.querySelectorAll("#question-types input[type='checkbox']");
+  questionTypeCheckboxes.forEach((checkbox) => {
+    checkbox.checked = true;
+  });
+
+  // Reset delimiter and tournament name
+  document.getElementById("delimiter").value = "";
+  document.getElementById("tournament").value = "";
+
+  // Reset 'display individual rounds' checkbox
+  document.getElementById("display-rounds").checked = false;
+}
