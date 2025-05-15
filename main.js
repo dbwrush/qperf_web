@@ -93,6 +93,7 @@ function parseRTFFile(file) {
         const content = event.target.result;
         const roundRegex = /SET #([A-Za-z0-9]+)/g;
         const parts = content.split("\\tab");
+        //console.log(parts);
         const questionTypesByRound = new Map();
 
         let currentRound = null;
@@ -113,9 +114,12 @@ function parseRTFFile(file) {
 
           // Extract question types (every second part contains question type info)
           if (index % 2 === 0 && part.trim().length > 0) {
+            //console.log("Possible question type in part: ", part);
             const chars = part.trim().split("");
-            if (chars.length > 1) {
-              questionTypes.push(chars[chars.length - 2]);
+            //Stop adding question types if the current round already has 20
+            if (chars.length > 1 && questionTypes.length < 20) {
+              questionTypes.push(chars[chars.length - 1]);
+              //console.log("Extracted question type: ", chars[chars.length - 1]);
             }
           }
         });
