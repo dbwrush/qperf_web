@@ -24,16 +24,19 @@
 
 /* Ensure the body and main elements fill the viewport */
 body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh; /* Ensure the body fills the viewport height */
+  margin: 0;
   background: var(--background-gradient);
   color: var(--text-color);
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  margin: 0;
   padding: 0;
   overflow: hidden; /* Prevent scrollbars during animation */
-  height: 100vh; /* Ensure the body fills the viewport height */
 }
 
 main {
+  flex: 1; /* Allow the main content to expand and push the footer down */
   display: flex;
   flex-direction: column;
   min-height: 100%; /* Ensure the main container fills the body */
@@ -318,6 +321,17 @@ input {
 .header-right a:hover {
   color: var(--glow-color-2);
   text-shadow: 0 0 5px var(--hover-glow);
+}
+
+/* Footer styling */
+.footer {
+  background: rgba(31, 31, 31, 0.8); /* Translucent background */
+  color: var(--text-color);
+  text-align: center;
+  padding: 1rem;
+  border-top: 1px solid var(--tile-border);
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px); /* Add a blur effect for a glassy look */
 }
 
 @media (prefers-color-scheme: dark) {
