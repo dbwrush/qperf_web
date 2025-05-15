@@ -73,6 +73,8 @@ document.getElementById("run").addEventListener("click", async () => {
 });
 
 async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, displayRounds) {
+  const warns = [];
+
   console.log("Question Files:", questionFiles);
   console.log("Log Files:", logFiles);
   console.log("Question Types:", questionTypes);
@@ -98,7 +100,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   // Updatable list of rounds, used to track team scores
   const rounds = [];
   updateArrays(
-    [],
+    warns,
     quizRecords,
     quizzerNames,
     questionTypesByRound,
@@ -108,7 +110,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     bonus,
     true,
     rounds
-  )
+  );
 
   let result = buildIndividualResults(
     quizzerNames,
@@ -121,7 +123,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   );
 
   let teamResult = buildTeamResults(
-    [],
+    warns,
     rounds,
     delimiter,
     true,
@@ -130,6 +132,16 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
 
   result += "\n" + teamResult;
   console.log("Final Result:\n", result);
+
+  // Display warnings in the HTML
+  const warningsDiv = document.getElementById("warnings");
+  warningsDiv.innerHTML = warns.length
+    ? warns.map(w => `<div class="warning">${w}</div>`).join("")
+    : "<div>No warnings.</div>";
+
+  // Enable save button and store result for download
+  window.qperfOutput = result;
+  document.getElementById("save-output").disabled = false;
 }
 
 function updateArrays(
@@ -849,4 +861,18 @@ function buildTeamResults(warns, rounds, delim, verbose, displayRounds) {
 
   return result;
 }
+
+document.getElementById("save-output").addEventListener("click", () => {
+  const output = window.qperfOutput || "";
+  const blob = new Blob([output], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "qperf_output.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
 
