@@ -44,7 +44,7 @@ document.getElementById("clear").addEventListener("click", () => {
   document.getElementById("status-message").textContent = "Waiting for input files";
 });
 
-document.getElementById("run").addEventListener("click", () => {
+document.getElementById("run").addEventListener("click", async () => {
   // Get the selected question set files
   const questionFiles = document.getElementById("questions-input").files;
   const questionFileContents = Array.from(questionFiles).map((file) => file);
@@ -69,10 +69,10 @@ document.getElementById("run").addEventListener("click", () => {
   const displayRounds = document.getElementById("display-rounds").checked;
 
   // Call the qperf function
-  qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, displayRounds);
+  await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, displayRounds);
 });
 
-function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, displayRounds) {
+async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, displayRounds) {
   console.log("Question Files:", questionFiles);
   console.log("Log Files:", logFiles);
   console.log("Question Types:", questionTypes);
@@ -80,10 +80,10 @@ function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName
   console.log("Tournament Name:", tournamentName);
   console.log("Display Rounds:", displayRounds);
 
-  const questionTypesByRound = getQuestionTypesByRound(questionFiles);
+  const questionTypesByRound = await getQuestionTypesByRound(questionFiles);
   console.log("Question Types by Round:", questionTypesByRound);
 
-  const [quizRecords, quizzerNames] = getRecords(logFiles, true, tournamentName);
+  const [quizRecords, quizzerNames] = await getRecords(logFiles, true, tournamentName);
 
   const numQuizzers = quizzerNames.length;
   const questionTypeList = ['A', 'G', 'I', 'Q', 'R', 'S', 'X', 'V', 'M'];
@@ -184,7 +184,7 @@ function updateArrays(
       // Determine question type
       let invalidQuestionType = false;
       let questionType = 'G';
-      if (!questionTypes.has(recordCollection.round)) {
+      if (!questionTypes.has(recordCollection.round)) {// questionTypes is Promise<Map<Any, Any>>
         if (!missing.has(round.round_number)) {
           missing.add(round.round_number);
           invalidQuestionType = true;
