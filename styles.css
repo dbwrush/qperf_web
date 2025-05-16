@@ -344,3 +344,10 @@ input {
     --hover-glow: rgba(36, 200, 219, 0.5);
   }
 }
+
+/* Hide header-right on small screens */
+@media (max-width: 400px) {
+  .header-right {
+    display: none;
+  }
+}
