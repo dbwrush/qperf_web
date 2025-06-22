@@ -66,8 +66,11 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   console.log("Tournament Name:", tournamentName);
   console.log("Display Rounds:", displayRounds);
 
-  const questionTypesByRound = await getQuestionTypesByRound(questionFiles);
+  const byRoundExtraction = await getQuestionTypesByRound(questionFiles);
+  const questionTypesByRound = byRoundExtraction[0];
+  const referencesByRound = byRoundExtraction[1];
   console.log("Question Types by Round:", questionTypesByRound);
+  console.log("References by Round:", referencesByRound);
 
   const [quizRecords, quizzerNames] = await getRecords(logFiles, true, tournamentName);
 
@@ -81,6 +84,8 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   const bonusAttempts = Array.from({ length: numQuizzers }, () => Array(numQuestionTypes).fill(0));
   const bonus = Array.from({ length: numQuizzers }, () => Array(numQuestionTypes).fill(0));
 
+  const referencesByQuizzer = Array.from({ length: numQuizzers }, () => []);
+
   // Updatable list of rounds, used to track team scores
   const rounds = [];
   updateArrays(
@@ -93,7 +98,9 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     bonusAttempts,
     bonus,
     true,
-    rounds
+    rounds,
+    referencesByRound,
+    referencesByQuizzer
   );
 
   let result = buildIndividualResults(
@@ -113,6 +120,19 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     true,
     displayRounds
   );
+
+  // Add references from each quizzer.
+  if (referencesByQuizzer.length > 0) {
+    result += "\n\nReferences by Quizzer:\n";
+    result += "Quizzer" + delimiter + "Team" + delimiter + "References\n";
+    for (let i = 0; i < quizzerNames.length; i++) {
+      if (referencesByQuizzer[i].length === 0) continue; // Skip if no references
+      const quizzerName = quizzerNames[i][0].replace(/^'+|'+$/g, "");
+      const teamName = quizzerNames[i][1].replace(/^'+|'+$/g, "");
+      const references = referencesByQuizzer[i].join(", ");
+      result += `${quizzerName}${delimiter}${teamName}${delimiter}${references}\n`;
+    }
+  }
 
   result += "\n" + teamResult;
   console.log("Final Result:\n", result);
@@ -145,7 +165,9 @@ function updateArrays(
   bonusAttempts,
   bonus,
   verbose,
-  rounds
+  rounds,
+  referencesByRound,
+  referencesByQuizzer
 ) {
   const missing = new Set();
 
@@ -182,8 +204,15 @@ function updateArrays(
       const teamNumber = parseInt((columns[8] || "").replace(/'/g, ""), 10) || 0;
       const questionNumber = (parseInt((columns[5] || "0").replace(/'/g, ""), 10) || 1) - 1;
 
-      // Find quizzer index
-      const quizzerIndex = quizzerNames.findIndex(n => n[0] === quizzerName);
+      // Find quizzer index in quizzerNames, verify team name matches
+      let oldMethod = quizzerNames.findIndex(n => n[0] === quizzerName);
+
+
+      const quizzerIndex = quizzerNames.findIndex(n => n[0] === quizzerName && n[1] === recordCollection.teams[teamNumber][0]);
+
+      if (oldMethod != quizzerIndex) {
+        console.log("WARNING: Found a case where the old method would have returned a different index! This indicates a duplicate quizzer name, as the old method only checks the quizzer name, not the team name.");
+      }
       // Determine question type
       let invalidQuestionType = false;
       let questionType = 'G';
@@ -205,6 +234,7 @@ function updateArrays(
       // Memory verse types
       const memory = questionType === 'Q' || questionType === 'R' || questionType === 'V';
       const questionTypeIndex = QUESTION_TYPE_INDICES[questionType] ?? 0;
+      const reference = referencesByRound.get(recordCollection.round)?.[questionNumber] || "";
 
       // TeamStat helpers
       function getOrCreateTeam(idx) {
@@ -226,6 +256,17 @@ function updateArrays(
           if (memory) {
             attempts[quizzerIndex][8]++;
             correctAnswers[quizzerIndex][8]++;
+
+            //check if the quizzer already has this reference
+            if (!referencesByQuizzer[quizzerIndex].includes(reference)) {
+              referencesByQuizzer[quizzerIndex].push(reference);
+              if (verbose) {
+                console.log(`[Memory Verse] Quizzer ${quizzerName} answered memory verse question correctly. Reference: ${reference}`);
+              }
+            } else if (verbose) {
+              console.log(`[Memory Verse] Quizzer ${quizzerName} already has this reference: ${reference}`);
+            }
+
           }
           {
             const team = getOrCreateTeam(teamNumber);
@@ -355,42 +396,65 @@ function parseRTFFile(file) {
       try {
         const content = event.target.result;
         const roundRegex = /SET #([A-Za-z0-9]+)/g;
-        const parts = content.split("\\tab");
+        const sets = content.split("fs24"); // Split by font size 24, which is where the round names are usually found
         //console.log(parts);
         const questionTypesByRound = new Map();
+        const referencesByRound = new Map();
 
         let currentRound = null;
         let questionTypes = [];
+        let references = [];
 
-        parts.forEach((part, index) => {
-          const match = roundRegex.exec(part);
-          if (match) {
-            // If a new round is found, save the previous round's data
-            if (currentRound && questionTypes.length > 0) {
-              questionTypesByRound.set(currentRound, questionTypes);
+        sets.forEach((set, index) => {
+          const parts = set.split("\\tab");
+          //iterate through all the parts of the set and extract question types and references
+          parts.forEach((part, index) => {
+            const match = roundRegex.exec(part);
+            if (match) {
+              // If a new round is found, save the previous round's data
+              if (currentRound && questionTypes.length > 0) {
+                questionTypesByRound.set(currentRound, questionTypes);
+                referencesByRound.set(currentRound, references);
+              }
+
+              // Start a new round
+              currentRound = `'${match[1]}'`; // Format round number like Rust
+              questionTypes = [];
+              references = [];
             }
 
-            // Start a new round
-            currentRound = `'${match[1]}'`; // Format round number like Rust
-            questionTypes = [];
-          }
+            // Every second part contains question type and reference. The rest just have the question itself.
+            if (index % 2 === 0 && part.trim().length > 0) {
+              console.log("Possible question type in part: ", part);
+              const chars = part.trim().split("");
+              //Stop adding question types if the current round already has 20
+              if (chars.length > 1 && questionTypes.length < 20) {
+                questionTypes.push(chars[chars.length - 1]);
+                //console.log("Extracted question type: ", chars[chars.length - 1]);
+              }
 
-          // Extract question types (every second part contains question type info)
-          if (index % 2 === 0 && part.trim().length > 0) {
-            //console.log("Possible question type in part: ", part);
-            const chars = part.trim().split("");
-            //Stop adding question types if the current round already has 20
-            if (chars.length > 1 && questionTypes.length < 20) {
-              questionTypes.push(chars[chars.length - 1]);
-              //console.log("Extracted question type: ", chars[chars.length - 1]);
+              // Parts with question types usually also contain references. (Not guaranteed, but likely)
+              // If present, the reference will always be in parenthesis.
+              // References are going to look like (1 Corinthians 13:4-7) or (John 3:16) or similar.
+              const refMatch = part.match(/\(([^)]+)\)/);
+              if (refMatch && refMatch[1]) {
+                const reference = refMatch[1].trim();
+                if (reference.length > 0) {
+                  references.push(reference);
+                  //console.log("Extracted reference: ", reference);
+                }
+              } else {
+                console.warn("No reference found in part: ", part);
+              }
             }
+          });
+
+          // If we reached the end of the set, save the round's data
+          if (currentRound && questionTypes.length > 0) {
+            questionTypesByRound.set(currentRound, questionTypes);
+            referencesByRound.set(currentRound, references);
           }
         });
-
-        // Save the last round's data
-        if (currentRound && questionTypes.length > 0) {
-          questionTypesByRound.set(currentRound, questionTypes);
-        }
 
         // Validate round names
         for (const [round, _types] of questionTypesByRound) {
@@ -401,7 +465,7 @@ function parseRTFFile(file) {
           }
         }
 
-        resolve(questionTypesByRound);
+        resolve({ questionTypesByRound, referencesByRound });
       } catch (error) {
         reject(`Error parsing RTF file: ${error.message}`);
       }
@@ -417,10 +481,11 @@ function parseRTFFile(file) {
 
 async function getQuestionTypesByRound(rtfFiles) {
   const questionTypesByRound = new Map();
+  const referencesByRound = new Map();
 
   for (const file of rtfFiles) {
     try {
-      const questionTypes = await parseRTFFile(file);
+      const {questionTypesByRound: questionTypes, referencesByRound: references} = await parseRTFFile(file);
 
       // Merge the results into the main map
       for (const [roundNumber, questionTypesArray] of questionTypes.entries()) {
@@ -432,12 +497,21 @@ async function getQuestionTypesByRound(rtfFiles) {
           questionTypesByRound.set(roundNumber, questionTypesArray);
         }
       }
+      for (const [roundNumber, referencesArray] of references.entries()) {
+        if (referencesByRound.has(roundNumber)) {
+          console.warn(
+            `Warning: Duplicate references for question set number: ${roundNumber}. Using only the first occurrence.`
+          );
+        } else {
+          referencesByRound.set(roundNumber, referencesArray);
+        }
+      }
     } catch (error) {
       console.error(`Error processing file ${file.name}: ${error}`);
     }
   }
 
-  return questionTypesByRound;
+  return [questionTypesByRound, referencesByRound];
 }
 
 /**
