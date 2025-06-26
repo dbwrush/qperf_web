@@ -21,11 +21,11 @@
     <main class="container">
       <section class="tile file-selection">
         <h2>File Selection</h2>
-        <div>
+        <div class="tooltip">
           <button id="select-questions">Pick Question Set Files (.rtf)</button>
           <input id="questions-input" type="file" accept=".rtf" multiple style="display: none;" />
           <p id="selected-questions">Selected: None</p>
-          <p id="note">Do not use converted RTF files, originals only!</p>
+          <span class="tooltiptext">Only use original .rtf files! Converted ones might not work!</span>
         </div>
         <div>
           <button id="select-logs">Pick QuizMachine Record Files (.csv)</button>
@@ -36,7 +36,7 @@
 
       <section class="tile question-types">
         <h2>Question Types</h2>
-        <div id="question-types">
+        <div id="question-types" class="tooltip">
           <label>
             <input type="checkbox" value="A" checked />
             <span class="toggle"></span>
@@ -82,6 +82,7 @@
             <span class="toggle"></span>
             Memory Verse totals (Q, R, V)
           </label>
+          <span class="tooltiptext">Individual quizzer stats on each question type selected</span>
         </div>
       </section>
 
