@@ -47,16 +47,19 @@ document.getElementById("run").addEventListener("click", async () => {
   // Get the tournament name
   const tournamentName = document.getElementById("tournament").value || "";
 
+  // Get the division name
+  const divisionName = document.getElementById("division").value || "";
+
   // Get the display individual rounds option
   const displayRounds = document.getElementById("display-rounds").checked;
 
   // Update status message to processing
   updateStatusMessage("processing");
   // Call the qperf function
-  await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, displayRounds);
+  await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, divisionName, displayRounds);
 });
 
-async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, displayRounds) {
+async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, divisionName, displayRounds) {
   const warns = [];
 
   console.log("Question Files:", questionFiles);
@@ -64,6 +67,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   console.log("Question Types:", questionTypes);
   console.log("Delimiter:", delimiter);
   console.log("Tournament Name:", tournamentName);
+  console.log("Division Name:", divisionName);
   console.log("Display Rounds:", displayRounds);
 
   const byRoundExtraction = await getQuestionTypesByRound(questionFiles);
@@ -72,7 +76,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   console.log("Question Types by Round:", questionTypesByRound);
   console.log("References by Round:", referencesByRound);
 
-  const [quizRecords, quizzerNames] = await getRecords(logFiles, true, tournamentName);
+  const [quizRecords, quizzerNames] = await getRecords(logFiles, true, tournamentName, divisionName);
 
   const numQuizzers = quizzerNames.length;
   const questionTypeList = ['A', 'G', 'I', 'Q', 'R', 'S', 'X', 'V', 'M'];
@@ -206,7 +210,6 @@ function updateArrays(
 
       // Find quizzer index in quizzerNames, verify team name matches
       let oldMethod = quizzerNames.findIndex(n => n[0] === quizzerName);
-
 
       const quizzerIndex = quizzerNames.findIndex(n => n[0] === quizzerName && n[1] === recordCollection.teams[teamNumber][0]);
 
@@ -684,11 +687,12 @@ function getQuizzerNames(records, verbose = false, warns = []) {
  * @param {File[]} csvFiles - Array of File objects (CSV files).
  * @param {boolean} verbose
  * @param {string} tourn - Tournament name to filter by (can be empty).
+ * @param {string} division - Division name to filter by (can be empty).
  * @param {Array<string>} warns - Array to collect warning messages.
  * @returns {Promise<[Map<string, Object>, Array<[string, string]>]>}
  */
-async function getRecords(csvFiles, verbose = false, tourn = "", warns = []) {
-  let quizRecords = [];
+async function getRecords(csvFiles, verbose = false, tourn = "", division = "", warns = []) {
+  let quizRecords = [];  
 
   // Read all CSV files and collect all records as strings
   for (const file of csvFiles) {
@@ -713,8 +717,15 @@ async function getRecords(csvFiles, verbose = false, tourn = "", warns = []) {
   // Filter records by event code and tournament name
   const filteredRecords = quizRecords.filter(record => {
     const columns = record.split(",");
-    // Tournament name is column 1 (index 1)
-    if (tourn && tourn !== (columns[1] || "")) {
+    // Tournament name is column 1 (index 1). Tourn in CSV sometimes has single quotes.
+    // If the difference in tourn and columns[1] is just the lack of single quotes, we should still consider it a match.
+    if (tourn && tourn !== (columns[1] || "") && `'${tourn}'` !==  columns[1]) {
+      console.log(`Skipping record for tournament ${columns[1]} when filtering by ${tourn}`);
+      return false;
+    }
+    // Division name is column 2 (index 2)
+    if (division && division !== (columns[2] || "") && `'${division}'` !==  columns[2]) {
+      console.log(`Skipping record for division ${columns[2]} when filtering by ${division}`);
       return false;
     }
     // Event code is column 10 (index 10)
@@ -1014,6 +1025,7 @@ function clear() {
   // Reset delimiter and tournament name
   document.getElementById("delimiter").value = "";
   document.getElementById("tournament").value = "";
+  document.getElementById("division").value = "";
 
   // Reset 'display individual rounds' checkbox
   document.getElementById("display-rounds").checked = false;
