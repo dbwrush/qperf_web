@@ -482,15 +482,67 @@ function parseRTFFile(file) {
   });
 }
 
-async function getQuestionTypesByRound(rtfFiles) {
+function parseJSONFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      try {
+        const content = JSON.parse(event.target.result);
+        const questionTypesByRound = new Map();
+        const referencesByRound = new Map();
+
+        for (const [setName, setData] of Object.entries(content)) {
+          const round = setData.round;
+          const questions = setData.questions;
+
+          const questionTypes = [];
+          const references = [];
+
+          for (const question of questions) {
+            questionTypes.push(question.type);
+            references.push(question.reference);
+          }
+
+          questionTypesByRound.set(round, questionTypes);
+          referencesByRound.set(round, references);
+        }
+
+        resolve({ questionTypesByRound, referencesByRound });
+      } catch (error) {
+        reject(`Error parsing JSON file: ${error.message}`);
+      }
+    };
+
+    reader.onerror = (error) => {
+      reject(`Error reading file: ${error.message}`);
+    };
+
+    reader.readAsText(file);
+  });
+}
+
+async function getQuestionTypesByRound(files) {
   const questionTypesByRound = new Map();
   const referencesByRound = new Map();
 
-  for (const file of rtfFiles) {
+  for (const file of files) {
     try {
-      const {questionTypesByRound: questionTypes, referencesByRound: references} = await parseRTFFile(file);
+      let parsedData;
 
-      // Merge the results into the main map
+      // Detect file type and call the appropriate parsing function
+      if (file.name.endsWith('.json') || file.name.endsWith('.qset')) {
+        parsedData = await parseJSONFile(file);
+      } else if (file.name.endsWith('.rtf')) {
+        parsedData = await parseRTFFile(file);
+      } else {
+        console.warn(`Unsupported file type: ${file.name}`);
+        continue;
+      }
+
+      const { questionTypesByRound: questionTypes, referencesByRound: references } = parsedData;
+
+      // Merge the results into the main maps
       for (const [roundNumber, questionTypesArray] of questionTypes.entries()) {
         if (questionTypesByRound.has(roundNumber)) {
           console.warn(
