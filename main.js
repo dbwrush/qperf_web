@@ -73,8 +73,10 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   const byRoundExtraction = await getQuestionTypesByRound(questionFiles);
   const questionTypesByRound = byRoundExtraction[0];
   const referencesByRound = byRoundExtraction[1];
+  const hasQuestionFiles = questionFiles.length > 0;
   console.log("Question Types by Round:", questionTypesByRound);
   console.log("References by Round:", referencesByRound);
+  console.log("Has Question Files:", hasQuestionFiles);
 
   const [quizRecords, quizzerNames] = await getRecords(logFiles, true, tournamentName, divisionName);
 
@@ -92,6 +94,9 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
 
   // Updatable list of rounds, used to track team scores
   const rounds = [];
+  // Initialize individual scores array
+  const individualScores = Array.from({ length: numQuizzers }, () => 0);
+  
   updateArrays(
     warns,
     quizRecords,
@@ -104,7 +109,9 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     true,
     rounds,
     referencesByRound,
-    referencesByQuizzer
+    referencesByQuizzer,
+    hasQuestionFiles,
+    individualScores
   );
 
   let result = buildIndividualResults(
@@ -114,7 +121,9 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     bonusAttempts,
     bonus,
     questionTypes,
-    delimiter
+    delimiter,
+    hasQuestionFiles,
+    individualScores
   );
 
   let teamResult = buildTeamResults(
@@ -125,8 +134,8 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     displayRounds
   );
 
-  // Add references from each quizzer.
-  if (referencesByQuizzer.length > 0) {
+  // Add references from each quizzer only if we have question files
+  if (hasQuestionFiles && referencesByQuizzer.length > 0) {
     result += "\n\nReferences by Quizzer:\n";
     result += "Quizzer" + delimiter + "Team" + delimiter + "References\n";
     for (let i = 0; i < quizzerNames.length; i++) {
@@ -171,7 +180,9 @@ function updateArrays(
   verbose,
   rounds,
   referencesByRound,
-  referencesByQuizzer
+  referencesByQuizzer,
+  hasQuestionFiles,
+  individualScores
 ) {
   const missing = new Set();
 
@@ -274,6 +285,7 @@ function updateArrays(
           {
             const team = getOrCreateTeam(teamNumber);
             team.team_score += 20;
+            individualScores[quizzerIndex] += 20;
             if (verbose) {
               console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question right. Added 20 points to team ${team.team_name}.`);
             }
@@ -289,11 +301,13 @@ function updateArrays(
                   console.log(`[Team Scoring] Quiz-out bonus applied to team ${team.team_name}.`);
                 }
                 team.team_score += 10;
+                individualScores[quizzerIndex] += 10;
               }
             }
             // 3rd/4th person bonus
             if (team.active_quizzers.filter(q => q[1] > 0).length >= 3 && quizzer[1] === 1) {
               team.team_score += 10;
+              individualScores[quizzerIndex] += 10;
               if (verbose) {
                 console.log(`[Team Scoring] 3rd/4th person bonus applied to team ${team.team_name}.`);
               }
@@ -312,6 +326,7 @@ function updateArrays(
               quizzer[2]++;
               if (quizzer[2] === 3 || questionNumber >= 15) {
                 team.team_score -= 10;
+                individualScores[quizzerIndex] -= 10;
                 if (verbose) {
                   console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question wrong. Deducted 10 points from team ${team.team_name}.`);
                 }
@@ -321,6 +336,7 @@ function updateArrays(
             } else {
               if (questionNumber >= 15) {
                 team.team_score -= 10;
+                individualScores[quizzerIndex] -= 10;
                 if (verbose) {
                   console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question wrong. Deducted 10 points from team ${team.team_name}.`);
                 }
@@ -341,6 +357,7 @@ function updateArrays(
           {
             const team = getOrCreateTeam(teamNumber);
             team.team_score += 10;
+            individualScores[quizzerIndex] += 10;
             if (verbose) {
               console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a bonus right. Added 10 points to team ${team.team_name}.`);
             }
@@ -375,7 +392,7 @@ function updateArrays(
     rounds.push(round);
   }
 
-  if (missing.size > 0) {
+  if (missing.size > 0 && hasQuestionFiles) {
     warns.push("Warning: Some rounds are missing question sets! These questions will be treated as general!");
     warns.push(`Skipped Rounds: ${Array.from(missing).join(", ")}`);
     const foundRounds = Array.from(questionTypes.keys()).sort();
@@ -812,32 +829,83 @@ async function getRecords(csvFiles, verbose = false, tourn = "", division = "", 
  * @param {number[][]} bonus
  * @param {string[]} types - Array of question type chars to include (e.g. ['A','G',...])
  * @param {string} delim - Delimiter (e.g. ",")
+ * @param {boolean} hasQuestionFiles - Whether question files were provided
+ * @param {number[]} individualScores - Array of individual scores
  * @returns {string}
  */
-function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAttempts, bonus, types, delim) {
+function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAttempts, bonus, types, delim, hasQuestionFiles, individualScores) {
   let result = "";
 
-  // Build the header
-  result += "Quizzer" + delim + "Team" + delim;
-  // Sorted question types
   const questionTypeList = ['A', 'G', 'I', 'Q', 'R', 'S', 'X', 'V', 'M'].filter(qt => types.length === 0 || types.includes(qt));
-  for (const qt of questionTypeList) {
-    result += `${qt} Attempted${delim}${qt} Correct${delim}${qt} Bonuses Attempted${delim}${qt} Bonuses Correct${delim}`;
-  }
-  result += "\n";
 
-  // Build the results for each quizzer
-  for (let i = 0; i < quizzerNames.length; i++) {
-    // Remove single quotes if present
-    const quizzerName = quizzerNames[i][0].replace(/^'+|'+$/g, "");
-    const team = quizzerNames[i][1].replace(/^'+|'+$/g, "");
-    result += `${quizzerName}${delim}${team}${delim}`;
+  if (hasQuestionFiles) {
+    // Build the header with question type breakdown
+    result += "Quizzer" + delim + "Team" + delim;
+    // Sorted question types
     for (const qt of questionTypeList) {
-      // Indices: A=0, G=1, ..., M=8
-      const idx = {A:0,G:1,I:2,Q:3,R:4,S:5,X:6,V:7,M:8}[qt] ?? 0;
-      result += `${attempts[i][idx]}${delim}${correctAnswers[i][idx]}${delim}${bonusAttempts[i][idx]}${delim}${bonus[i][idx]}${delim}`;
+      result += `${qt} Attempted${delim}${qt} Correct${delim}${qt} Bonuses Attempted${delim}${qt} Bonuses Correct${delim}`;
     }
+    // Add totals at the end
+    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim;
     result += "\n";
+
+    // Build the results for each quizzer
+    for (let i = 0; i < quizzerNames.length; i++) {
+      // Remove single quotes if present
+      const quizzerName = quizzerNames[i][0].replace(/^'+|'+$/g, "");
+      const team = quizzerNames[i][1].replace(/^'+|'+$/g, "");
+      result += `${quizzerName}${delim}${team}${delim}`;
+      
+      let totalAttempted = 0;
+      let totalCorrect = 0;
+      let totalBonusAttempted = 0;
+      let totalBonusCorrect = 0;
+
+      for (const qt of questionTypeList) {
+        // Indices: A=0, G=1, ..., M=8
+        const idx = {A:0,G:1,I:2,Q:3,R:4,S:5,X:6,V:7,M:8}[qt] ?? 0;
+        result += `${attempts[i][idx]}${delim}${correctAnswers[i][idx]}${delim}${bonusAttempts[i][idx]}${delim}${bonus[i][idx]}${delim}`;
+        
+        // Don't double count memory verses (M) in totals since they're already counted in Q, R, V
+        if (qt !== 'M') {
+          totalAttempted += attempts[i][idx];
+          totalCorrect += correctAnswers[i][idx];
+          totalBonusAttempted += bonusAttempts[i][idx];
+          totalBonusCorrect += bonus[i][idx];
+        }
+      }
+      
+      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}`;
+      result += "\n";
+    }
+  } else {
+    // No question files provided - just show totals
+    result += "Quizzer" + delim + "Team" + delim;
+    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim;
+    result += "\n";
+
+    // Build the results for each quizzer
+    for (let i = 0; i < quizzerNames.length; i++) {
+      const quizzerName = quizzerNames[i][0].replace(/^'+|'+$/g, "");
+      const team = quizzerNames[i][1].replace(/^'+|'+$/g, "");
+      result += `${quizzerName}${delim}${team}${delim}`;
+      
+      let totalAttempted = 0;
+      let totalCorrect = 0;
+      let totalBonusAttempted = 0;
+      let totalBonusCorrect = 0;
+
+      // Sum across all question types except M (to avoid double counting)
+      for (let idx = 0; idx < 8; idx++) { // 0-7, excluding M (index 8)
+        totalAttempted += attempts[i][idx];
+        totalCorrect += correctAnswers[i][idx];
+        totalBonusAttempted += bonusAttempts[i][idx];
+        totalBonusCorrect += bonus[i][idx];
+      }
+      
+      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}`;
+      result += "\n";
+    }
   }
 
   return result;
@@ -995,7 +1063,7 @@ function updateStatusMessage(stage = "init") {
   const statusDiv = document.getElementById("status-message");
   switch (stage) {
     case "init":
-      statusDiv.textContent = "Waiting for input files. Please select both a question set (RTF) and quiz logs (CSV) to begin.";
+      statusDiv.textContent = "Waiting for input files. Please select quiz logs (CSV) to begin. Question set files (RTF/QSET) are optional.";
       break;
     case "ready":
       statusDiv.textContent = "Files loaded! Set question types and settings. When ready, click 'Run' to process your data.";
@@ -1031,7 +1099,8 @@ function checkFilesReady() {
   console.log("Questions selected:", questionsSelected);
   console.log("Logs selected:", logsSelected);
 
-  if (questionsSelected && logsSelected) {
+  // Only require logs to be selected, questions are now optional
+  if (logsSelected) {
     updateStatusMessage("ready");
     runButton.disabled = false;
   } else {
