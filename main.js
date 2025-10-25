@@ -52,14 +52,17 @@ document.getElementById("run").addEventListener("click", async () => {
 
   // Get the display individual rounds option
   const displayRounds = document.getElementById("display-rounds").checked;
+  
+  // Get the include bonus references option
+  const includeBonusRefs = document.getElementById("include-bonus-refs").checked;
 
   // Update status message to processing
   updateStatusMessage("processing");
   // Call the qperf function
-  await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, divisionName, displayRounds);
+  await qperf(questionFileContents, logFileContents, selectedQuestionTypes, delimiter, tournamentName, divisionName, displayRounds, includeBonusRefs);
 });
 
-async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, divisionName, displayRounds) {
+async function qperf(questionFiles, logFiles, questionTypes, delimiter, tournamentName, divisionName, displayRounds, includeBonusRefs) {
   const warns = [];
 
   console.log("Question Files:", questionFiles);
@@ -96,6 +99,7 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
   const rounds = [];
   // Initialize individual scores array
   const individualScores = Array.from({ length: numQuizzers }, () => 0);
+  const individualScoresNoBonuses = Array.from({ length: numQuizzers }, () => 0);
   
   updateArrays(
     warns,
@@ -111,7 +115,8 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     referencesByRound,
     referencesByQuizzer,
     hasQuestionFiles,
-    individualScores
+    individualScores,
+    individualScoresNoBonuses
   );
 
   let result = buildIndividualResults(
@@ -123,7 +128,8 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
     questionTypes,
     delimiter,
     hasQuestionFiles,
-    individualScores
+    individualScores,
+    individualScoresNoBonuses
   );
 
   let teamResult = buildTeamResults(
@@ -142,7 +148,17 @@ async function qperf(questionFiles, logFiles, questionTypes, delimiter, tourname
       if (referencesByQuizzer[i].length === 0) continue; // Skip if no references
       const quizzerName = quizzerNames[i][0].replace(/^'+|'+$/g, "");
       const teamName = quizzerNames[i][1].replace(/^'+|'+$/g, "");
-      const references = referencesByQuizzer[i].join(", ");
+      
+      // Filter references based on includeBonusRefs toggle
+      let filteredReferences = referencesByQuizzer[i];
+      if (!includeBonusRefs) {
+        // Exclude bonus references (those starting with [B])
+        filteredReferences = filteredReferences.filter(ref => !ref.startsWith('[B]'));
+      }
+      // When includeBonusRefs is true, keep the [B] prefix in the output
+      
+      if (filteredReferences.length === 0) continue; // Skip if no references after filtering
+      const references = filteredReferences.join(", ");
       result += `${quizzerName}${delimiter}${teamName}${delimiter}${references}\n`;
     }
   }
@@ -182,7 +198,8 @@ function updateArrays(
   referencesByRound,
   referencesByQuizzer,
   hasQuestionFiles,
-  individualScores
+  individualScores,
+  individualScoresNoBonuses
 ) {
   const missing = new Set();
 
@@ -286,6 +303,7 @@ function updateArrays(
             const team = getOrCreateTeam(teamNumber);
             team.team_score += 20;
             individualScores[quizzerIndex] += 20;
+            individualScoresNoBonuses[quizzerIndex] += 20;
             if (verbose) {
               console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question right. Added 20 points to team ${team.team_name}.`);
             }
@@ -302,12 +320,14 @@ function updateArrays(
                 }
                 team.team_score += 10;
                 individualScores[quizzerIndex] += 10;
+                individualScoresNoBonuses[quizzerIndex] += 10;
               }
             }
             // 3rd/4th person bonus
             if (team.active_quizzers.filter(q => q[1] > 0).length >= 3 && quizzer[1] === 1) {
               team.team_score += 10;
               individualScores[quizzerIndex] += 10;
+              individualScoresNoBonuses[quizzerIndex] += 10;
               if (verbose) {
                 console.log(`[Team Scoring] 3rd/4th person bonus applied to team ${team.team_name}.`);
               }
@@ -327,6 +347,7 @@ function updateArrays(
               if (quizzer[2] === 3 || questionNumber >= 15) {
                 team.team_score -= 10;
                 individualScores[quizzerIndex] -= 10;
+                individualScoresNoBonuses[quizzerIndex] -= 10;
                 if (verbose) {
                   console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question wrong. Deducted 10 points from team ${team.team_name}.`);
                 }
@@ -337,6 +358,7 @@ function updateArrays(
               if (questionNumber >= 15) {
                 team.team_score -= 10;
                 individualScores[quizzerIndex] -= 10;
+                individualScoresNoBonuses[quizzerIndex] -= 10;
                 if (verbose) {
                   console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a question wrong. Deducted 10 points from team ${team.team_name}.`);
                 }
@@ -353,11 +375,23 @@ function updateArrays(
           if (memory) {
             bonusAttempts[quizzerIndex][8]++;
             bonus[quizzerIndex][8]++;
+            
+            // Track bonus reference with a prefix to identify it later
+            const bonusReference = `[B]${reference}`;
+            if (!referencesByQuizzer[quizzerIndex].includes(bonusReference)) {
+              referencesByQuizzer[quizzerIndex].push(bonusReference);
+              if (verbose) {
+                console.log(`[Memory Verse Bonus] Quizzer ${quizzerName} answered memory verse bonus correctly. Reference: ${reference}`);
+              }
+            } else if (verbose) {
+              console.log(`[Memory Verse Bonus] Quizzer ${quizzerName} already has this bonus reference: ${reference}`);
+            }
           }
           {
             const team = getOrCreateTeam(teamNumber);
             team.team_score += 10;
             individualScores[quizzerIndex] += 10;
+            // Note: individualScoresNoBonuses is NOT incremented for bonuses
             if (verbose) {
               console.log(`[Team Scoring] Rm: ${round.room_number} Rd: ${round.round_number} Q: ${questionNumber + 1} Quizzer ${quizzerName} got a bonus right. Added 10 points to team ${team.team_name}.`);
             }
@@ -831,9 +865,10 @@ async function getRecords(csvFiles, verbose = false, tourn = "", division = "", 
  * @param {string} delim - Delimiter (e.g. ",")
  * @param {boolean} hasQuestionFiles - Whether question files were provided
  * @param {number[]} individualScores - Array of individual scores
+ * @param {number[]} individualScoresNoBonuses - Array of individual scores excluding bonuses
  * @returns {string}
  */
-function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAttempts, bonus, types, delim, hasQuestionFiles, individualScores) {
+function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAttempts, bonus, types, delim, hasQuestionFiles, individualScores, individualScoresNoBonuses) {
   let result = "";
 
   const questionTypeList = ['A', 'G', 'I', 'Q', 'R', 'S', 'X', 'V', 'M'].filter(qt => types.length === 0 || types.includes(qt));
@@ -846,7 +881,7 @@ function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAtt
       result += `${qt} Attempted${delim}${qt} Correct${delim}${qt} Bonuses Attempted${delim}${qt} Bonuses Correct${delim}`;
     }
     // Add totals at the end
-    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim;
+    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim + "Total Score without Bonuses" + delim;
     result += "\n";
 
     // Build the results for each quizzer
@@ -875,13 +910,13 @@ function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAtt
         }
       }
       
-      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}`;
+      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}${individualScoresNoBonuses[i]}${delim}`;
       result += "\n";
     }
   } else {
     // No question files provided - just show totals
     result += "Quizzer" + delim + "Team" + delim;
-    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim;
+    result += "Total Attempted" + delim + "Total Correct" + delim + "Total Bonuses Attempted" + delim + "Total Bonuses Correct" + delim + "Total Score" + delim + "Total Score without Bonuses" + delim;
     result += "\n";
 
     // Build the results for each quizzer
@@ -903,7 +938,7 @@ function buildIndividualResults(quizzerNames, attempts, correctAnswers, bonusAtt
         totalBonusCorrect += bonus[i][idx];
       }
       
-      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}`;
+      result += `${totalAttempted}${delim}${totalCorrect}${delim}${totalBonusAttempted}${delim}${totalBonusCorrect}${delim}${individualScores[i]}${delim}${individualScoresNoBonuses[i]}${delim}`;
       result += "\n";
     }
   }
